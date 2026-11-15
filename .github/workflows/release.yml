@@ -42,7 +42,7 @@ jobs:
           cd dist
           sha256sum "forgecrypt-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" > "forgecrypt-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz.sha256"
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ForgeCrypt ${{ github.ref_name }} GLOBAL
           body_path: RELEASE_NOTES.md
