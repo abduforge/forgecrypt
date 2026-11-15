@@ -161,7 +161,7 @@ pub fn encrypt_bytes(plaintext: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, For
 
     let ciphertext = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::try_from(&nonce[..]).map_err(|_| ForgeCryptError::InvalidEnvelope)?,
             Payload {
                 msg: plaintext,
                 aad: &header,
@@ -194,7 +194,7 @@ pub fn decrypt_bytes(envelope: &[u8], passphrase: &[u8]) -> Result<Vec<u8>, Forg
 
     let plaintext = cipher
         .decrypt(
-            XNonce::from_slice(nonce),
+            &XNonce::try_from(nonce).map_err(|_| ForgeCryptError::InvalidEnvelope)?,
             Payload {
                 msg: &envelope[HEADER_LEN..],
                 aad: header,

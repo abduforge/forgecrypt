@@ -1,3 +1,6 @@
 /target/
 *.fgc
 .forgecrypt-*.tmp
+
+# Disposable local demo input
+/private.txt

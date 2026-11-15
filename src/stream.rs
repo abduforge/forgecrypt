@@ -246,7 +246,7 @@ pub fn encrypt_reader<R: Read, W: Write>(
         let aad = associated_data(&header, &record, None);
         let encrypted = cipher
             .encrypt(
-                XNonce::from_slice(&nonce),
+                &XNonce::try_from(&nonce[..]).map_err(|_| ForgeCryptError::InvalidStreamRecord)?,
                 Payload {
                     msg: &chunk[..filled],
                     aad: &aad,
@@ -267,7 +267,7 @@ pub fn encrypt_reader<R: Read, W: Write>(
     let aad = associated_data(&header, &record, Some(total));
     let final_tag = cipher
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::try_from(&nonce[..]).map_err(|_| ForgeCryptError::InvalidStreamRecord)?,
             Payload {
                 msg: &[],
                 aad: &aad,
@@ -335,7 +335,8 @@ pub fn decrypt_reader<R: Read, W: Write>(
                 let plaintext = Zeroizing::new(
                     cipher
                         .decrypt(
-                            XNonce::from_slice(&nonce),
+                            &XNonce::try_from(&nonce[..])
+                                .map_err(|_| ForgeCryptError::InvalidStreamRecord)?,
                             Payload {
                                 msg: &ciphertext,
                                 aad: &aad,
@@ -364,7 +365,8 @@ pub fn decrypt_reader<R: Read, W: Write>(
                 let aad = associated_data(&header, &record, Some(total));
                 let final_plaintext = cipher
                     .decrypt(
-                        XNonce::from_slice(&nonce),
+                        &XNonce::try_from(&nonce[..])
+                            .map_err(|_| ForgeCryptError::InvalidStreamRecord)?,
                         Payload {
                             msg: &final_tag,
                             aad: &aad,
