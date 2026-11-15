@@ -1,10 +1,19 @@
-# ForgeCrypt 0.1.0
+# ForgeCrypt 1.2.0
 
-**ForgeCrypt** is a Linux-first Rust CLI and library for encrypting small local configuration files and secrets used by the ForgeVPN project.
+**ForgeCrypt** is a Linux-first Rust CLI and library for authenticated encryption of small local configuration files and secrets used by the AbduForge / ForgeVPN ecosystem.
 
-> **Status: experimental.** This version has not received an independent security audit. Do not treat it as production-grade or as the only protection for high-value secrets.
+> **Status: experimental.** This project has not received an independent security audit. Do not treat it as production-grade or as the only protection for high-value secrets.
 
-ForgeCrypt is not a VPN, peer-discovery system, key-exchange protocol, or network handshake. ForgeVPN should use the established WireGuard implementation for its first network transport. ForgeCrypt currently protects local files **at rest**.
+ForgeCrypt protects local files **at rest**. It is not a VPN, peer-discovery system, key-exchange protocol, or network handshake. ForgeVPN should use the established WireGuard implementation for its first network transport.
+
+## What's new in 1.2.0
+
+- `verify`: authenticate an encrypted file without writing plaintext to disk.
+- `rekey`: change the passphrase by creating a newly encrypted output file; the source is never modified.
+- Library APIs `verify_bytes` and `reencrypt_bytes`.
+- Additional tests for verification, wrong passwords, re-keying, and fresh envelope randomness.
+- Clearer command documentation and stricter CI linting.
+- Backward compatibility with the 0.1.0 envelope format.
 
 ## Cryptographic design
 
@@ -20,6 +29,8 @@ The algorithms are provided by established libraries. ForgeCrypt does not implem
 
 ### Envelope format v1
 
+ForgeCrypt 1.2.0 intentionally continues to write and read the same **envelope format v1** introduced in 0.1.0. The software release number (1.2.0) is separate from the on-disk format version (1). Existing 0.1.0 encrypted files remain readable.
+
 The binary envelope contains:
 
 1. Eight-byte magic value `FGCRYPT\0`.
@@ -29,28 +40,21 @@ The binary envelope contains:
 5. A fresh 24-byte XChaCha20 nonce.
 6. Authenticated ciphertext and a 16-byte Poly1305 tag.
 
-The complete header is authenticated as AEAD associated data. A change to the salt, nonce, parameters, or other header bytes therefore causes decryption/authentication to fail. Parameters are checked against the exact supported values before Argon2 runs, preventing a hostile file from requesting arbitrary KDF memory or iteration counts.
+The complete header is authenticated as AEAD associated data. KDF parameters are validated against the supported values before Argon2 runs, preventing hostile files from requesting arbitrary KDF resources.
 
-The format is versioned. Do not change its layout or KDF parameters without introducing a compatible migration plan and format-version review.
+The format is intentionally fixed for compatibility. Any future incompatible format change requires a new format version and a documented migration plan.
 
 ## Requirements
 
 - Linux (first supported target)
 - Rust 1.85 or newer; current stable is recommended
-- Cargo and a C build toolchain may be needed by transitive dependencies on some platforms
+- Cargo
 
-The current Rust stable release can be installed or updated with the official rustup toolchain manager. On MX Linux, after Rust is installed, verify:
-
-```bash
-rustc --version
-cargo --version
-```
-
-## Build and test
+## Build, test, and lint
 
 ```bash
-cargo fmt --check
-cargo test
+cargo fmt --all -- --check
+cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo build --release
 ./target/release/forgecrypt --version
@@ -66,51 +70,83 @@ No root privileges are required. Ensure `~/.local/bin` is in your `PATH`.
 
 ## CLI
 
-Create an encrypted copy. ForgeCrypt asks for a new passphrase twice and does not echo it:
+### Encrypt a file
+
+Creates a new encrypted copy. ForgeCrypt asks for a new passphrase twice and does not echo it:
 
 ```bash
 forgecrypt encrypt ./peer.conf ./peer.conf.fgc
 ```
 
-Display public envelope metadata (this does not authenticate the payload):
+### Decrypt a file
 
-```bash
-forgecrypt inspect ./peer.conf.fgc
-```
-
-Decrypt to a new file:
+The plaintext is written only after authentication succeeds. The output must not already exist:
 
 ```bash
 forgecrypt decrypt ./peer.conf.fgc ./peer-restored.conf
 ```
 
-Help and version:
+### Verify an encrypted file
+
+Checks the passphrase and AEAD authentication without writing plaintext to disk:
+
+```bash
+forgecrypt verify ./peer.conf.fgc
+```
+
+This is useful for checking a backup or transfer before relying on it.
+
+### Change the passphrase (re-key)
+
+Authenticates the original file with the current passphrase, then asks for a new passphrase twice. A new encrypted file is created using a fresh salt and nonce. The original is not modified and the output must not already exist:
+
+```bash
+forgecrypt rekey ./peer.conf.fgc ./peer-new-key.conf.fgc
+```
+
+Keep the new passphrase safe before deleting or archiving the old encrypted file. If the new passphrase is lost, the new file cannot be recovered.
+
+### Inspect public metadata
+
+```bash
+forgecrypt inspect ./peer.conf.fgc
+```
+
+`inspect` does not authenticate the ciphertext. Use `verify` when you need to check authenticity.
+
+### Help and version
 
 ```bash
 forgecrypt --help
 forgecrypt --version
 ```
 
-### Safety properties in this version
+## Safety properties
 
 - Passphrases are entered interactively, not passed through process arguments.
-- New passphrases must be at least 14 characters and no more than 1024 UTF-8 bytes.
+- New passphrases must contain at least 14 characters and no more than 1024 UTF-8 bytes.
 - Existing output files are never overwritten (`create_new`).
 - Output files are created with mode `0600` on Unix.
 - Plaintext input is capped at 16 MiB; this version buffers data in memory.
-- No plaintext is returned from decryption unless the AEAD authentication succeeds.
+- Decryption exposes no plaintext until AEAD authentication succeeds.
+- `verify` discards authenticated plaintext in a zeroizing buffer and writes no plaintext file.
+- `rekey` does not modify or delete the original encrypted input.
 - KDF settings in an input envelope are strictly validated before derivation.
 
-## Rust library example
+## Rust library API
 
 ```rust
-use forgecrypt::{decrypt_bytes, encrypt_bytes};
+use forgecrypt::{decrypt_bytes, encrypt_bytes, reencrypt_bytes, verify_bytes};
 use zeroize::Zeroizing;
 
-let passphrase = b"a long unique passphrase with several words";
+let old_passphrase = b"a long unique old passphrase for ForgeCrypt";
+let new_passphrase = b"a different long unique passphrase for ForgeCrypt";
 let plaintext = Zeroizing::new(b"private configuration".to_vec());
-let encrypted = encrypt_bytes(&plaintext, passphrase)?;
-let opened = Zeroizing::new(decrypt_bytes(&encrypted, passphrase)?);
+
+let encrypted = encrypt_bytes(&plaintext, old_passphrase)?;
+verify_bytes(&encrypted, old_passphrase)?;
+let rotated = reencrypt_bytes(&encrypted, old_passphrase, new_passphrase)?;
+let opened = Zeroizing::new(decrypt_bytes(&rotated, new_passphrase)?);
 assert_eq!(&opened[..], b"private configuration");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
@@ -121,9 +157,10 @@ Callers should keep plaintext buffers in `zeroize::Zeroizing` where practical. M
 
 - No independent security audit has been performed.
 - A weak or reused passphrase can be guessed offline. Use a long, unique passphrase.
-- Losing the passphrase means the encrypted file cannot be recovered. Keep a separate secure backup of the original configuration.
+- Losing the passphrase means the encrypted file cannot be recovered. Keep a separate secure backup.
+- `inspect` displays unauthenticated public header metadata; it does not prove payload integrity.
 - File sizes and filesystem metadata (such as timestamps and filenames) are not hidden.
-- It does not protect a compromised, unlocked device, malware, keyloggers, or secrets while in active use.
-- It is not streaming encryption, disk encryption, a VPN tunnel, or a peer authentication protocol.
+- It does not protect a compromised, unlocked device, malware, keyloggers, memory inspection while secrets are in use, or secrets while actively used.
+- It is not streaming encryption, disk encryption, a VPN tunnel, or a peer-authentication protocol.
 
 See [SECURITY.md](SECURITY.md), [PROJECT_PLAN.md](PROJECT_PLAN.md), and [docs/FORMAT.md](docs/FORMAT.md).

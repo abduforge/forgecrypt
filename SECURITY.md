@@ -2,11 +2,13 @@
 
 ## Release status
 
-ForgeCrypt 0.1.0 is experimental and has not received an independent security audit. Do not market it as unbreakable, audited, or production-ready.
+ForgeCrypt 1.2.0 is experimental and has not received an independent security audit. Do not market it as unbreakable, audited, or production-ready.
 
 ## Intended threat model
 
 ForgeCrypt is designed to protect the contents of small local files against an attacker who obtains a copy of the encrypted envelope but does not know the passphrase. The AEAD tag detects ciphertext and authenticated-header modification.
+
+The `verify` command authenticates an envelope but does not write decrypted data to disk. The `rekey` command first authenticates the old envelope, then creates a separate new envelope using a new passphrase, fresh salt, and fresh nonce. It never modifies the source file.
 
 It does not protect against a compromised or unlocked endpoint, malware, keyloggers, memory inspection while secrets are in use, weak/reused passphrases, filesystem metadata disclosure, backups outside the encrypted file, or an attacker who can replace the executable or its dependencies.
 
@@ -20,6 +22,8 @@ It does not protect against a compromised or unlocked endpoint, malware, keylogg
 - Keep secret material in zeroizing buffers where practical; do not claim this eliminates every memory copy.
 - Review dependency updates and security advisories before releases.
 - Do not change the on-disk format without a version/migration plan.
+- `inspect` output is unauthenticated metadata; use `verify` to authenticate an envelope.
+- `rekey` must leave the original envelope intact and must not write plaintext to a temporary file.
 
 ## Reporting
 

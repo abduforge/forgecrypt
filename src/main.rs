@@ -1,5 +1,6 @@
 use forgecrypt::{
-    decrypt_bytes, encrypt_bytes, inspect_envelope, MAX_ENVELOPE_BYTES, MAX_PLAINTEXT_BYTES,
+    MAX_ENVELOPE_BYTES, MAX_PLAINTEXT_BYTES, decrypt_bytes, encrypt_bytes, inspect_envelope,
+    verify_bytes,
 };
 use std::{
     env,
@@ -30,6 +31,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         [command, input, output] if command == "encrypt" => encrypt_file(input, output),
         [command, input, output] if command == "decrypt" => decrypt_file(input, output),
         [command, input] if command == "inspect" => inspect_file(input),
+        [command, input] if command == "verify" => verify_file(input),
+        [command, input, output] if command == "rekey" => rekey_file(input, output),
         [flag] if flag == "--version" || flag == "version" => {
             println!("ForgeCrypt {}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -64,6 +67,34 @@ fn decrypt_file(input: &str, output: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn verify_file(input: &str) -> Result<(), Box<dyn Error>> {
+    let envelope = read_bounded(input, MAX_ENVELOPE_BYTES)?;
+    let passphrase = Zeroizing::new(rpassword::prompt_password("Passphrase: ")?);
+    let info = verify_bytes(&envelope, passphrase.as_bytes())?;
+    println!("Authentication successful: {input}");
+    println!(
+        "Format version: {} · Ciphertext: {} bytes",
+        info.version, info.ciphertext_bytes
+    );
+    println!("The plaintext was not written to disk.");
+    Ok(())
+}
+
+fn rekey_file(input: &str, output: &str) -> Result<(), Box<dyn Error>> {
+    let envelope = read_bounded(input, MAX_ENVELOPE_BYTES)?;
+    let old_passphrase = Zeroizing::new(rpassword::prompt_password("Current passphrase: ")?);
+    // Authenticate the old envelope before prompting for the replacement passphrase.
+    // Authenticate and hold the plaintext only in a zeroizing buffer.
+    let plaintext = Zeroizing::new(decrypt_bytes(&envelope, old_passphrase.as_bytes())?);
+    let new_passphrase = read_new_passphrase()?;
+    // encrypt_bytes generates a fresh salt and nonce for the replacement envelope.
+    let new_envelope = encrypt_bytes(&plaintext, new_passphrase.as_bytes())?;
+    write_new_private_file(output, &new_envelope)?;
+    println!("Re-keyed encrypted file created: {output}");
+    println!("The original file was not modified.");
+    Ok(())
+}
+
 fn inspect_file(input: &str) -> Result<(), Box<dyn Error>> {
     let envelope = read_bounded(input, MAX_ENVELOPE_BYTES)?;
     let info = inspect_envelope(&envelope)?;
@@ -74,7 +105,10 @@ fn inspect_file(input: &str) -> Result<(), Box<dyn Error>> {
     println!("  KDF iterations : {}", info.kdf_iterations);
     println!("  KDF parallelism: {}", info.kdf_parallelism);
     println!("  Cipher         : XChaCha20-Poly1305");
-    println!("  Salt / nonce   : {} / {} bytes", info.salt_bytes, info.nonce_bytes);
+    println!(
+        "  Salt / nonce   : {} / {} bytes",
+        info.salt_bytes, info.nonce_bytes
+    );
     println!("  Ciphertext     : {} bytes", info.ciphertext_bytes);
     println!("Note: this command does not authenticate or decrypt the payload.");
     Ok(())
@@ -85,13 +119,14 @@ fn read_new_passphrase() -> Result<Zeroizing<String>, Box<dyn Error>> {
         "New passphrase (14+ characters): ",
     )?);
     if first.chars().count() < MIN_PASSPHRASE_CHARS {
-        return Err(format!(
-            "passphrase must contain at least {MIN_PASSPHRASE_CHARS} characters"
-        )
-        .into());
+        return Err(
+            format!("passphrase must contain at least {MIN_PASSPHRASE_CHARS} characters").into(),
+        );
     }
     if first.len() > MAX_PASSPHRASE_BYTES {
-        return Err(format!("passphrase must not exceed {MAX_PASSPHRASE_BYTES} UTF-8 bytes").into());
+        return Err(
+            format!("passphrase must not exceed {MAX_PASSPHRASE_BYTES} UTF-8 bytes").into(),
+        );
     }
 
     let second = Zeroizing::new(rpassword::prompt_password("Repeat passphrase: ")?);
@@ -146,7 +181,7 @@ fn write_new_private_file(path: &str, data: &[u8]) -> io::Result<()> {
 
 fn print_help() {
     println!(
-        "ForgeCrypt {}\n\nUSAGE:\n  forgecrypt encrypt <input> <output>\n  forgecrypt decrypt <input> <output>\n  forgecrypt inspect <file>\n  forgecrypt --version\n  forgecrypt --help\n\nNOTES:\n  - Passphrases are requested interactively, never as CLI arguments.\n  - Existing output files are never overwritten.\n  - Output files are created with owner-only permissions on Unix.\n  - Maximum plaintext size: 16 MiB.\n  - This protects local files at rest; it is not a VPN tunnel or network handshake.",
+        "ForgeCrypt {}\n\nUSAGE:\n  forgecrypt encrypt <input> <output>\n  forgecrypt decrypt <input> <output>\n  forgecrypt verify <file>\n  forgecrypt rekey <input> <output>\n  forgecrypt inspect <file>\n  forgecrypt --version\n  forgecrypt --help\n\nNOTES:\n  - Passphrases are requested interactively, never as CLI arguments.\n  - Existing output files are never overwritten.\n  - Output files are created with owner-only permissions on Unix.\n  - Maximum plaintext size: 16 MiB.\n  - verify authenticates the envelope without writing plaintext to disk.\n  - rekey creates a new encrypted file and leaves the original unchanged.\n  - This protects local files at rest; it is not a VPN tunnel or network handshake.",
         env!("CARGO_PKG_VERSION")
     );
 }
