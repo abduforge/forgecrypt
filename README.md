@@ -2,6 +2,12 @@
 
 # ForgeCrypt 2.0 GLOBAL
 
+<p align="center">
+  <img src="docs/assets/forgecrypt-demo.gif"
+       alt="ForgeCrypt terminal demonstration"
+       width="900">
+</p>
+
 **Strong file encryption. Simple commands. Linux first.**
 
 [![Download latest release](https://img.shields.io/github/v/release/abduforge/forgecrypt?display_name=tag&style=for-the-badge&label=DOWNLOAD%20FOR%20LINUX)](https://github.com/abduforge/forgecrypt/releases/latest)
