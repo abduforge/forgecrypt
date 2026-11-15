@@ -1,166 +1,196 @@
-# ForgeCrypt 1.2.0
+<div align="center">
 
-**ForgeCrypt** is a Linux-first Rust CLI and library for authenticated encryption of small local configuration files and secrets used by the AbduForge / ForgeVPN ecosystem.
+# ForgeCrypt 2.0 GLOBAL
 
-> **Status: experimental.** This project has not received an independent security audit. Do not treat it as production-grade or as the only protection for high-value secrets.
+**Strong file encryption. Simple commands. Linux first.**
 
-ForgeCrypt protects local files **at rest**. It is not a VPN, peer-discovery system, key-exchange protocol, or network handshake. ForgeVPN should use the established WireGuard implementation for its first network transport.
+[![Download latest release](https://img.shields.io/github/v/release/abduforge/forgecrypt?display_name=tag&style=for-the-badge&label=DOWNLOAD%20FOR%20LINUX)](https://github.com/abduforge/forgecrypt/releases/latest)
+[![CI](https://github.com/abduforge/forgecrypt/actions/workflows/ci.yml/badge.svg)](https://github.com/abduforge/forgecrypt/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## What's new in 1.2.0
+**Encrypt any-size files, verify them without saving plaintext, and change passphrases — all with a small, easy-to-use Rust CLI.**
 
-- `verify`: authenticate an encrypted file without writing plaintext to disk.
-- `rekey`: change the passphrase by creating a newly encrypted output file; the source is never modified.
-- Library APIs `verify_bytes` and `reencrypt_bytes`.
-- Additional tests for verification, wrong passwords, re-keying, and fresh envelope randomness.
-- Clearer command documentation and stricter CI linting.
-- Backward compatibility with the 0.1.0 envelope format.
+[Русская документация](README_RU.md) · [Releases](https://github.com/abduforge/forgecrypt/releases) · [Report a security issue](SECURITY.md)
 
-## Cryptographic design
+</div>
 
-| Purpose | Primitive / implementation |
+---
+
+## Get started in 30 seconds
+
+1. Click **DOWNLOAD FOR LINUX** above and download the Linux archive from the latest release.
+2. Extract the archive.
+3. Open a terminal in the extracted folder and run:
+
+```bash
+./install.sh
+```
+
+4. Encrypt a file:
+
+```bash
+forgecrypt encrypt ./private.txt ./private.txt.fgc
+```
+
+ForgeCrypt asks for a passphrase twice. It does not show the passphrase while you type.
+
+**No terminal?** Download the archive first. The detailed installation guide is below.
+
+## What ForgeCrypt does
+
+| You want to… | Run |
 |---|---|
-| Password-based key derivation | Argon2id, version 1.3 |
-| Authenticated encryption | XChaCha20-Poly1305 |
-| Salt and nonce generation | Operating-system CSPRNG through `getrandom` |
-| Key and passphrase cleanup | `zeroize` |
-| Hidden interactive passphrase input | `rpassword` |
+| Encrypt a file | `forgecrypt encrypt input output.fgc` |
+| Decrypt a file | `forgecrypt decrypt input.fgc output` |
+| Check that an encrypted file is authentic | `forgecrypt verify input.fgc` |
+| Change its passphrase | `forgecrypt rekey input.fgc new-copy.fgc` |
+| View public format information | `forgecrypt inspect input.fgc` |
+| Check the build/runtime information | `forgecrypt doctor` |
 
-The algorithms are provided by established libraries. ForgeCrypt does not implement its own cipher, hash function, KDF, random generator, or AEAD construction.
+**Simple rule:** ForgeCrypt never overwrites an existing output file. Choose a new output name.
 
-### Envelope format v1
+## Why version 2.0 is different
 
-ForgeCrypt 1.2.0 intentionally continues to write and read the same **envelope format v1** introduced in 0.1.0. The software release number (1.2.0) is separate from the on-disk format version (1). Existing 0.1.0 encrypted files remain readable.
+- **Large-file streaming:** format v2 processes files in 1 MiB chunks instead of loading the whole file into RAM.
+- **Authenticated chunks:** every chunk is authenticated independently and tied to its sequence number.
+- **Truncation detection:** an authenticated final record detects incomplete files.
+- **Verify without output:** `verify` checks the complete file and writes no plaintext file.
+- **Streaming re-key:** `rekey` changes the passphrase through a bounded in-memory pipe; it does not create a plaintext temporary file.
+- **Safer output handling:** the CLI stages output with owner-only permissions and publishes it only after the operation succeeds. Existing files are not replaced.
+- **Legacy compatibility:** files in the v1 format created by ForgeCrypt 0.1.x and 1.2.x can still be decrypted, verified, inspected, and re-keyed. Legacy v1 files are limited to 16 MiB.
 
-The binary envelope contains:
+## Install
 
-1. Eight-byte magic value `FGCRYPT\0`.
-2. Format version and algorithm identifiers.
-3. Fixed Argon2id parameters (64 MiB memory, 3 iterations, 1 lane).
-4. A fresh 16-byte salt.
-5. A fresh 24-byte XChaCha20 nonce.
-6. Authenticated ciphertext and a 16-byte Poly1305 tag.
+### Option A — download a release (recommended)
 
-The complete header is authenticated as AEAD associated data. KDF parameters are validated against the supported values before Argon2 runs, preventing hostile files from requesting arbitrary KDF resources.
+1. Open [GitHub Releases](https://github.com/abduforge/forgecrypt/releases/latest).
+2. Download the Linux archive matching your system (`x86_64` for most Intel/AMD PCs).
+3. Extract it and open a terminal in the extracted directory.
+4. Run:
 
-The format is intentionally fixed for compatibility. Any future incompatible format change requires a new format version and a documented migration plan.
+```bash
+./install.sh
+```
 
-## Requirements
+The installer places the executable in `~/.local/bin`. No root access is required. If the command is not found, add this directory to your `PATH`:
 
-- Linux (first supported target)
-- Rust 1.85 or newer; current stable is recommended
-- Cargo
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile
+. ~/.profile
+```
 
-## Build, test, and lint
+### Option B — build from source
+
+Requirements: Linux, Rust stable (1.85 or newer), and Cargo.
 
 ```bash
 cargo fmt --all -- --check
 cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo build --release
-./target/release/forgecrypt --version
-```
-
-For a local install to `~/.local/bin`:
-
-```bash
 ./install.sh
 ```
 
-No root privileges are required. Ensure `~/.local/bin` is in your `PATH`.
+## Commands explained
 
-## CLI
-
-### Encrypt a file
-
-Creates a new encrypted copy. ForgeCrypt asks for a new passphrase twice and does not echo it:
+### Encrypt
 
 ```bash
-forgecrypt encrypt ./peer.conf ./peer.conf.fgc
+forgecrypt encrypt ./document.pdf ./document.pdf.fgc
 ```
 
-### Decrypt a file
+Creates a new encrypted file. ForgeCrypt asks for a new passphrase twice. Use a long, unique passphrase that you can keep safe.
 
-The plaintext is written only after authentication succeeds. The output must not already exist:
+### Decrypt
 
 ```bash
-forgecrypt decrypt ./peer.conf.fgc ./peer-restored.conf
+forgecrypt decrypt ./document.pdf.fgc ./document-restored.pdf
 ```
 
-### Verify an encrypted file
+The CLI writes to a private temporary file. It publishes the requested output only after all chunks and the final authentication record have been verified. If authentication fails, the requested output is not created.
 
-Checks the passphrase and AEAD authentication without writing plaintext to disk:
+### Verify
 
 ```bash
-forgecrypt verify ./peer.conf.fgc
+forgecrypt verify ./document.pdf.fgc
 ```
 
-This is useful for checking a backup or transfer before relying on it.
+Checks the password and the complete authentication of the encrypted file. Plaintext is discarded in memory; no plaintext output file is created.
 
-### Change the passphrase (re-key)
-
-Authenticates the original file with the current passphrase, then asks for a new passphrase twice. A new encrypted file is created using a fresh salt and nonce. The original is not modified and the output must not already exist:
+### Change a passphrase (re-key)
 
 ```bash
-forgecrypt rekey ./peer.conf.fgc ./peer-new-key.conf.fgc
+forgecrypt rekey ./document.pdf.fgc ./document-new-key.pdf.fgc
 ```
 
-Keep the new passphrase safe before deleting or archiving the old encrypted file. If the new passphrase is lost, the new file cannot be recovered.
+ForgeCrypt asks for the current passphrase and then the new passphrase twice. For v2 files, it verifies and re-encrypts through a bounded in-memory channel without creating an intermediate plaintext file. A legacy v1 file (maximum 16 MiB) is opened in a zeroizing memory buffer and upgraded to v2. The original encrypted file remains unchanged.
 
-### Inspect public metadata
+### Inspect
 
 ```bash
-forgecrypt inspect ./peer.conf.fgc
+forgecrypt inspect ./document.pdf.fgc
 ```
 
-`inspect` does not authenticate the ciphertext. Use `verify` when you need to check authenticity.
+Shows public header information. **Inspect does not verify authenticity.** Use `verify` for that.
 
-### Help and version
+### Doctor and help
 
 ```bash
+forgecrypt doctor
 forgecrypt --help
 forgecrypt --version
 ```
 
-## Safety properties
+## Cryptographic design
 
-- Passphrases are entered interactively, not passed through process arguments.
-- New passphrases must contain at least 14 characters and no more than 1024 UTF-8 bytes.
-- Existing output files are never overwritten (`create_new`).
-- Output files are created with mode `0600` on Unix.
-- Plaintext input is capped at 16 MiB; this version buffers data in memory.
-- Decryption exposes no plaintext until AEAD authentication succeeds.
-- `verify` discards authenticated plaintext in a zeroizing buffer and writes no plaintext file.
-- `rekey` does not modify or delete the original encrypted input.
-- KDF settings in an input envelope are strictly validated before derivation.
+ForgeCrypt uses established implementations; it does not invent a cipher or a cryptographic protocol.
 
-## Rust library API
+| Purpose | Implementation |
+|---|---|
+| Password-based key derivation | Argon2id v1.3 |
+| Authenticated encryption | XChaCha20-Poly1305 |
+| Salt and per-record nonces | Operating-system CSPRNG via `getrandom` |
+| Sensitive buffer cleanup | `zeroize` |
+| Hidden terminal passphrase prompt | `rpassword` |
 
-```rust
-use forgecrypt::{decrypt_bytes, encrypt_bytes, reencrypt_bytes, verify_bytes};
-use zeroize::Zeroizing;
+Format v2 uses a fresh 16-byte salt per file and a fresh 24-byte nonce per record. The file header, record kind, sequence number, plaintext length, nonce, and final total length are authenticated as associated data. The format uses fixed, validated Argon2id parameters (64 MiB memory, 3 iterations, 1 lane); a file cannot request arbitrary KDF memory or iteration counts.
 
-let old_passphrase = b"a long unique old passphrase for ForgeCrypt";
-let new_passphrase = b"a different long unique passphrase for ForgeCrypt";
-let plaintext = Zeroizing::new(b"private configuration".to_vec());
+See [docs/FORMAT.md](docs/FORMAT.md) for the binary format and [SECURITY.md](SECURITY.md) for security assumptions and reporting.
 
-let encrypted = encrypt_bytes(&plaintext, old_passphrase)?;
-verify_bytes(&encrypted, old_passphrase)?;
-let rotated = reencrypt_bytes(&encrypted, old_passphrase, new_passphrase)?;
-let opened = Zeroizing::new(decrypt_bytes(&rotated, new_passphrase)?);
-assert_eq!(&opened[..], b"private configuration");
-# Ok::<(), Box<dyn std::error::Error>>(())
+## Compatibility
+
+ForgeCrypt 2.0 writes **format v2** for new encryptions. It can read **format v1** files from ForgeCrypt 0.1.x and 1.2.x. V1 is a legacy in-memory format limited to 16 MiB; v2 is the streaming format. The application version and the encrypted-file format version are different things.
+
+## Important security notes
+
+- ForgeCrypt protects files at rest. It is **not** a VPN, network tunnel, peer-to-peer protocol, or device identity system.
+- This project has not yet received an independent security audit. Treat it as experimental and do not use it as the only protection for irreplaceable or high-value data.
+- A weak or reused passphrase can be guessed offline. Use a long, unique passphrase.
+- If you lose the passphrase, ForgeCrypt cannot recover the data. Keep a separate secure backup before deleting the original.
+- File names, file sizes, and ordinary filesystem metadata are not hidden.
+- Encryption cannot protect data after it has been decrypted on a compromised device, nor against malware, keyloggers, memory inspection, crash dumps, or an unlocked session.
+- The CLI stages output in a mode-`0600` file in the destination directory and publishes it only after success. During `decrypt` this staging file contains plaintext. A sudden power loss or forced termination could leave a hidden `.forgecrypt-*.tmp` file behind; after an interrupted decrypt, treat any such file as plaintext.
+- Secure deletion cannot be guaranteed on SSDs, copy-on-write filesystems, snapshots, or journaled storage.
+
+## Uninstall
+
+```bash
+./uninstall.sh
 ```
 
-Callers should keep plaintext buffers in `zeroize::Zeroizing` where practical. Memory erasure cannot undo copies made elsewhere by the application, operating system, swap, crash dumps, or debugging tools.
+This removes the executable from `~/.local/bin`. It does not delete your encrypted files or passphrases.
 
-## Limitations
+## Development
 
-- No independent security audit has been performed.
-- A weak or reused passphrase can be guessed offline. Use a long, unique passphrase.
-- Losing the passphrase means the encrypted file cannot be recovered. Keep a separate secure backup.
-- `inspect` displays unauthenticated public header metadata; it does not prove payload integrity.
-- File sizes and filesystem metadata (such as timestamps and filenames) are not hidden.
-- It does not protect a compromised, unlocked device, malware, keyloggers, memory inspection while secrets are in use, or secrets while actively used.
-- It is not streaming encryption, disk encryption, a VPN tunnel, or a peer-authentication protocol.
+```bash
+cargo fmt --all -- --check
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo build --release
+```
 
-See [SECURITY.md](SECURITY.md), [PROJECT_PLAN.md](PROJECT_PLAN.md), and [docs/FORMAT.md](docs/FORMAT.md).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Please report suspected vulnerabilities privately using the instructions in [SECURITY.md](SECURITY.md).
+
+---
+
+**ForgeCrypt is part of the AbduForge ecosystem.**

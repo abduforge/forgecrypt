@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: Test and lint
+    name: Format, test, lint, and build
     runs-on: ubuntu-latest
     steps:
       - name: Check out source

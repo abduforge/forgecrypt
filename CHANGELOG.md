@@ -2,29 +2,25 @@
 
 All notable changes to ForgeCrypt are documented here.
 
-## [1.2.0] - 2026-11-15
+## [2.0.0] - GLOBAL
 
 ### Added
-- `verify <file>` authenticates an envelope without writing plaintext to disk.
-- `rekey <input> <output>` changes the passphrase by creating a new envelope with fresh salt and nonce; the original remains untouched.
-- Public library APIs `verify_bytes` and `reencrypt_bytes`.
-- Tests for verification, incorrect credentials, re-keying, and key rotation behavior.
+- Streaming format v2 for large regular files, processed in 1 MiB chunks.
+- Per-record XChaCha20-Poly1305 authentication with a fresh OS-generated 24-byte nonce per record.
+- Authenticated final record binding the final sequence number and total plaintext length, detecting truncation.
+- Streaming `encrypt`, `decrypt`, `verify`, and `rekey` CLI operations.
+- Bounded in-memory re-key pipeline; no intermediate plaintext file is written for format v2.
+- Staged private outputs; CLI publishes destination files only after successful completion and never overwrites existing paths.
+- Backward reading, verification, inspection, and re-key support for legacy format v1 files.
+- `doctor` command and expanded English/Russian documentation.
+- GitHub release workflow for Linux x86_64 archives.
 
-### Improved
-- Documentation distinguishes software release 1.2.0 from compatible envelope format v1.
-- CI treats Clippy warnings as errors.
-- CLI help explains verification and re-key semantics.
+### Changed
+- New encryptions now use container format v2.
+- Version output identifies the GLOBAL release.
+- README starts with a direct latest-release download link and a short quick-start guide.
 
-### Compatibility
-- Reads and writes the same envelope format v1 as ForgeCrypt 0.1.0. No migration is required for existing encrypted files.
-
-## [0.1.0] - 2026-11-15
-
-### Added
-- Rust library and Linux-first CLI for local file encryption/decryption.
-- Argon2id v1.3 key derivation and XChaCha20-Poly1305 authenticated encryption.
-- Versioned binary envelope with authenticated header and strict KDF-parameter validation.
-- OS CSPRNG salt/nonce generation and zeroizing key/passphrase buffers.
-- Interactive passphrase prompts, bounded file input, no-overwrite output, and Unix `0600` permissions.
-- Unit tests for round trips, wrong passphrases, tampering, truncation, malformed headers, and size limits.
-- Linux installation script and GitHub Actions CI workflow.
+### Security notes
+- No independent security audit has been performed.
+- Format v1 remains limited to 16 MiB and uses the legacy in-memory implementation.
+- Format v2 is experimental until independently reviewed.

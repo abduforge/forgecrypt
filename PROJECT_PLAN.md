@@ -1,30 +1,33 @@
-# ForgeCrypt / ForgeVPN roadmap
+# ForgeCrypt Roadmap
 
-## ForgeCrypt 1.2.0 — current scope
+## 2.0 GLOBAL (current)
 
-- Local authenticated encryption for small config files and secrets.
-- Argon2id v1.3 + XChaCha20-Poly1305.
-- Fresh OS-random salt and nonce per encryption.
-- Compatible, versioned envelope format v1.
-- Hidden terminal passphrase input, no-clobber output, Unix mode `0600`, 16 MiB input cap.
-- `verify` authenticates an envelope without writing plaintext to disk.
-- `rekey` creates a new encrypted copy under a new passphrase without altering the original.
-- Rust library APIs for encryption, decryption, verification, and re-encryption.
+- Streaming authenticated file format v2.
+- 1 MiB chunks with per-record authentication and sequence binding.
+- Authenticated final record for truncation detection.
+- Streaming encrypt, decrypt, verify, and re-key.
+- Bounded in-memory re-key pipeline.
+- Private staged outputs with no-overwrite publishing.
+- Backward support for format v1.
+- English and Russian quick-start documentation.
+- Linux x86_64 release automation.
 
-## Next development steps
+## 2.1 — usability and resilience
 
-1. Build on the target MX Linux device and run formatting, tests, and Clippy.
-2. Add stable format test vectors and fuzz the envelope parser.
-3. Produce and review a Cargo lockfile from a verified build.
-4. Obtain independent code and cryptographic review before treating it as security-critical.
-5. Keep WireGuard as ForgeVPN's network tunnel and peer session protocol initially.
-6. Design device identity, enrollment, revocation, key rotation, peer coordination, and NAT traversal separately.
-7. Do not design a custom authenticated network handshake until a written threat model, formal protocol analysis, test vectors, and independent review exist.
+- Progress output that never leaks passphrases or plaintext.
+- Optional machine-readable operation summaries.
+- Recovery-oriented diagnostics for incomplete output files.
+- More fuzzing and property-based tests for parsers and record boundaries.
 
-## Non-goals for 1.2.0
+## 2.2 — review and portability
 
-- VPN tunnel creation or routing.
-- Peer discovery or NAT traversal.
-- Password storage service or general-purpose password manager.
-- Large-file or streaming encryption.
-- Custom cryptographic primitives or a custom network protocol.
+- Independent review of the v2 format and implementation.
+- Linux ARM64 CI and release artifacts.
+- Reproducible-build improvements and dependency review.
+
+## 3.0 — only after review
+
+- Consider additional workflows only after format v2 has received independent review.
+- Any new cryptographic format requires a documented version, test vectors, and migration plan.
+
+ForgeCrypt is a local file-encryption tool. VPN transport and peer-to-peer networking belong to ForgeVPN and must use established protocols such as WireGuard.

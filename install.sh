@@ -2,19 +2,25 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-BIN_DIR="${HOME}/.local/bin"
+BIN_DIR=${INSTALL_DIR:-"${HOME}/.local/bin"}
 
-if ! command -v cargo >/dev/null 2>&1; then
-    echo "Error: Cargo is missing. Install a current stable Rust toolchain first." >&2
-    exit 1
+if [ -x "$PROJECT_DIR/target/release/forgecrypt" ]; then
+    SOURCE_BIN="$PROJECT_DIR/target/release/forgecrypt"
+elif [ -x "$PROJECT_DIR/forgecrypt" ]; then
+    SOURCE_BIN="$PROJECT_DIR/forgecrypt"
+else
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "Error: no release binary found and Cargo is not installed." >&2
+        echo "Download the Linux binary archive or install Rust/Cargo to build from source." >&2
+        exit 1
+    fi
+    (cd "$PROJECT_DIR" && cargo build --release)
+    SOURCE_BIN="$PROJECT_DIR/target/release/forgecrypt"
 fi
 
-cd "$PROJECT_DIR"
-cargo build --release
 mkdir -p "$BIN_DIR"
-install -m 0755 target/release/forgecrypt "$BIN_DIR/forgecrypt"
-
-echo "Installed ForgeCrypt to: $BIN_DIR/forgecrypt"
+install -m 0755 "$SOURCE_BIN" "$BIN_DIR/forgecrypt"
+echo "ForgeCrypt installed to: $BIN_DIR/forgecrypt"
 case ":${PATH}:" in
     *":$BIN_DIR:"*) ;;
     *) echo "Add this to your shell profile if needed: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;

@@ -1,8 +1,10 @@
-//! ForgeCrypt: authenticated encryption for small local configuration files.
+//! ForgeCrypt: streaming authenticated file encryption for Linux.
 //!
 //! This crate uses established implementations of Argon2id and XChaCha20-Poly1305.
-//! It does not implement a cipher, random generator, hash function, key exchange,
-//! peer-authentication protocol, or VPN transport.
+//! New file operations use the chunked stream format in [`stream`]. The older v1
+//! byte-envelope API remains available for backward compatibility.
+//! This crate does not implement a cipher, random generator, hash function, key
+//! exchange, peer-authentication protocol, or VPN transport.
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{
@@ -11,6 +13,8 @@ use chacha20poly1305::{
 };
 use std::fmt;
 use zeroize::Zeroizing;
+
+pub mod stream;
 
 const MAGIC: &[u8; 8] = b"FGCRYPT\0";
 const FORMAT_VERSION: u8 = 1;
@@ -40,11 +44,10 @@ const SALT_OFFSET: usize = PARALLELISM_OFFSET + 4;
 const NONCE_OFFSET: usize = SALT_OFFSET + SALT_LEN;
 const HEADER_LEN: usize = NONCE_OFFSET + NONCE_LEN;
 
-/// Maximum plaintext supported by ForgeCrypt format v1 (16 MiB).
-///
-/// This is a deliberate bound because this release buffers data in memory.
+/// Maximum plaintext supported by the legacy byte-envelope format v1 (16 MiB).
+/// Format v2 in [`stream`] supports large files using bounded-memory chunks.
 pub const MAX_PLAINTEXT_BYTES: usize = 16 * 1024 * 1024;
-/// Maximum serialized envelope size, including header and authentication tag.
+/// Maximum serialized legacy v1 envelope size, including header and authentication tag.
 pub const MAX_ENVELOPE_BYTES: usize = HEADER_LEN + MAX_PLAINTEXT_BYTES + TAG_LEN;
 
 /// Errors returned by ForgeCrypt operations.
@@ -60,7 +63,7 @@ pub enum ForgeCryptError {
     UnsupportedVersion(u8),
     /// Envelope uses an unsupported KDF or cipher identifier.
     UnsupportedSuite,
-    /// Envelope contains KDF settings not supported by format v1.
+    /// Envelope contains unsupported KDF settings.
     UnsupportedParameters,
     /// Key derivation failed.
     KeyDerivationFailed,
@@ -68,12 +71,24 @@ pub enum ForgeCryptError {
     RandomGenerationFailed,
     /// Authentication failed: wrong passphrase or modified envelope.
     AuthenticationFailed,
+    /// An I/O operation failed.
+    Io(String),
+    /// A stream record is malformed, reordered, or violates format rules.
+    InvalidStreamRecord,
+    /// The authenticated final record is missing or the stream is truncated.
+    TruncatedStream,
+    /// Unexpected bytes follow the authenticated final record.
+    TrailingData,
+    /// The stream length or sequence number overflowed.
+    LengthOverflow,
+    /// A background worker failed during streaming re-key.
+    WorkerFailed,
 }
 
 impl fmt::Display for ForgeCryptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InputTooLarge => write!(f, "input exceeds the 16 MiB limit"),
+            Self::InputTooLarge => write!(f, "input exceeds the 16 MiB legacy format limit"),
             Self::InvalidPassphrase => write!(f, "passphrase must be 1–1024 bytes"),
             Self::InvalidEnvelope => write!(f, "invalid or truncated ForgeCrypt envelope"),
             Self::UnsupportedVersion(v) => write!(f, "unsupported ForgeCrypt format version: {v}"),
@@ -87,6 +102,19 @@ impl fmt::Display for ForgeCryptError {
                     "authentication failed (wrong passphrase or modified file)"
                 )
             }
+            Self::Io(message) => write!(f, "I/O error: {message}"),
+            Self::InvalidStreamRecord => {
+                write!(f, "invalid or out-of-order encrypted stream record")
+            }
+            Self::TruncatedStream => write!(
+                f,
+                "encrypted stream is truncated or missing its final record"
+            ),
+            Self::TrailingData => {
+                write!(f, "unexpected data follows the authenticated final record")
+            }
+            Self::LengthOverflow => write!(f, "encrypted stream exceeds supported length"),
+            Self::WorkerFailed => write!(f, "streaming re-key worker failed"),
         }
     }
 }
@@ -414,7 +442,7 @@ mod tests {
             Err(ForgeCryptError::InvalidPassphrase)
         );
         assert_eq!(
-            encrypt_bytes(b"secret", &vec![b'x'; PASSPHRASE_MAX_BYTES + 1]),
+            encrypt_bytes(b"secret", &[b'x'; PASSPHRASE_MAX_BYTES + 1]),
             Err(ForgeCryptError::InvalidPassphrase)
         );
     }
